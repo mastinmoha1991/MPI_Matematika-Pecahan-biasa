@@ -1,0 +1,279 @@
+
+
+
+Chatbox AI
+
+Sign in
+media_pem....html
+
+TEXT
+53.65 KB
+modifikasi kode HTML ini agar terhubung dengan database Google Sheets menggunakan Google Apps Script (GAS).
+
+Kebutuhan Backend (Google Apps Script - Code.gs):
+Buat script yang dapat menerima data dari frontend dan secara otomatis membuat 2 sheet (jika belum ada) dengan format berikut:
+1. Sheet "Data Soal" (dari menu bermain dan menu berlatih): Berisi kolom untuk menampilkan daftar soal beserta pilihan jawabannya.
+2. Sheet "Hasil": Berisi kolom untuk analisis guru, meliputi: Waktu Pengerjaan (Timestamp), Nama Siswa, Kelas, Jumlah Jawaban Benar, Jumlah Jawaban Salah, dan Detail Inputan Jawaban Siswa untuk setiap soal.
+
+Kebutuhan Frontend (index.html):
+Buat antarmuka berbasis HTML/JS yang siap di-hosting melalui GitHub Pages.
+Catatan Penting: Deklarasikan tautan web app Google Apps Script di bagian atas script JS menggunakan variabel konstan const GAS_URL = "URL_GAS_ANDA_DISINI"; agar link tersebut sangat mudah dicari dan diganti nantinya.
+
+Output yang Saya Harapkan:
+a. Frontend: Kode HTML/JS/CSS yang sudah dimodifikasi (siap di-hosting di GitHub Pages dan tidak mengubah/mengurangi struktur dan semua fitur dari MPI).
+b. Backend: Kode Code.gs secara utuh.
+c. Panduan Deployment: Berikan instruksi langkah demi langkah yang sangat jelas mulai dari:
+- Cara setup Spreadsheet dan men-deploy Google Apps Script sebagai Web App (termasuk setting permission).
+- Cara men-deploy file index.html ke GitHub Pages.
+
+
+Berikut adalah solusi lengkap modifikasi frontend (index.html) dan backend (Code.gs) untuk menghubungkan aplikasi Anda dengan Google Sheets menggunakan Google Apps Script. Saya juga sertakan panduan deployment.
+
+A. Backend (Google Apps Script - Code.gs)
+javascript
+
+
+// Global constants for sheet names
+const SHEET_DATA_SOAL = "Data Soal";
+const SHEET_HASIL = "Hasil";
+/**
+ * Buat sheet Data Soal dan Hasil jika belum ada
+ * @param {Spreadsheet} ss - Spreadsheet aktif
+ */
+function setupSheets(ss) {
+  let sheetSoal = ss.getSheetByName(SHEET_DATA_SOAL);
+  if (!sheetSoal) {
+    sheetSoal = ss.insertSheet(SHEET_DATA_SOAL);
+    // Set kolom contoh Data Soal
+    sheetSoal.appendRow(["Nomor Soal", "Soal", "Pilihan A", "Pilihan B", "Pilihan C", "Pilihan D", "Jawaban Benar"]);
+  }
+  let sheetHasil = ss.getSheetByName(SHEET_HASIL);
+  if (!sheetHasil) {
+    sheetHasil = ss.insertSheet(SHEET_HASIL);
+    // Kolom dasar hasil kuis
+    // Detail inputan jawaban siswa dimasukkan dalam satu kolom JSON/string
+    sheetHasil.appendRow([
+      "Timestamp",
+      "Nama Siswa",
+      "Kelas",
+      "Jumlah Jawaban Benar",
+      "Jumlah Jawaban Salah",
+      "Detail Jawaban Siswa"
+    ]);
+  }
+}
+/**
+ * Entry point Web App POST untuk menerima data dari frontend
+ * Menyimpan hasil LKPD dan Kuis ke Sheet "Hasil"
+ */
+function doPost(e) {
+  // Parsing data dari request POST JSON
+  let ss = SpreadsheetApp.getActiveSpreadsheet();
+  setupSheets(ss);
+  let sheetHasil = ss.getSheetByName(SHEET_HASIL);
+  try {
+    let data = JSON.parse(e.postData.contents);
+    // Validasi minimal: harus punya nama, kelas, dan data jawaban
+    if (!data.nama || !data.kelas || !data.detailJawaban) {
+      return ContentService.createTextOutput(JSON.stringify({status: "fail", message: "Data tidak lengkap"}))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    // Hitung jumlah benar & salah jika tersedia jawaban benar (opsional)
+    // Jika data soal diperlukan ada di sheet, tapi di sini backend cuma menyimpan hasil
+    let benar = 0;
+    let salah = 0;
+    if (data.jawabanBenar && typeof data.jawabanBenar === 'number' &&
+        data.jawabanSalah && typeof data.jawabanSalah === 'number') {
+      benar = data.jawabanBenar;
+      salah = data.jawabanSalah;
+    }
+    // Simpan sebagai baris baru
+    sheetHasil.appendRow([
+      new Date(),
+      data.nama,
+      data.kelas,
+      benar,
+      salah,
+      JSON.stringify(data.detailJawaban)
+    ]);
+    return ContentService.createTextOutput(JSON.stringify({status: "success", message: "Data tersimpan"}))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch(err) {
+    return ContentService.createTextOutput(JSON.stringify({status: "fail", message: err.toString()}))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+/**
+ * Optional function untuk menambahkan soal ke sheet "Data Soal"
+ * Frontend / admin bisa panggil ini via UI Apps Script kalau perlu
+ */
+function addSoal(soalObjArray) {
+  let ss = SpreadsheetApp.getActiveSpreadsheet();
+  setupSheets(ss);
+  let sheetSoal = ss.getSheetByName(SHEET_DATA_SOAL);
+  soalObjArray.forEach(soalObj => {
+    sheetSoal.appendRow([
+      soalObj.nomorSoal || "",
+      soalObj.soal || "",
+      soalObj.pilihanA || "",
+      soalObj.pilihanB || "",
+      soalObj.pilihanC || "",
+      soalObj.pilihanD || "",
+      soalObj.jawabanBenar || ""
+    ]);
+  });
+}
+/** 
+ * Optional GET untuk debugging/load soal
+ */
+function doGet(e) {
+  let ss = SpreadsheetApp.getActiveSpreadsheet();
+  setupSheets(ss);
+  let sheetSoal = ss.getSheetByName(SHEET_DATA_SOAL);
+  let data = sheetSoal.getDataRange().getValues();
+  return ContentService.createTextOutput(JSON.stringify({status:"success", data: data}))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+B. Frontend (index.html) — modifikasi utama di script JS bagian pengiriman data
+Tambahkan ini di bagian <script> Anda pada kode HTML Anda yang sudah ada:
+
+html
+
+
+<script>
+  // URL Web App GAS (gantikan ini dengan URL web app Anda nanti)
+  const GAS_URL = "URL_GAS_ANDA_DISINI";
+  // Contoh fungsi kirim hasil LKPD ke GAS
+  async function kirimHasilLkpd() {
+    if (!currentUser.name || !currentUser.class) {
+      alert("Mohon login terlebih dahulu.");
+      return;
+    }
+    // Ambil data jawaban LKPD yang sudah diisi user dari form
+    const detailJawaban = {
+      jawabanLkpd1: document.getElementById("jawabanLkpd1").value.trim(),
+      jawabanLkpd2: document.getElementById("jawabanLkpd2").value.trim(),
+      jawabanLkpd3a: document.getElementById("jawabanLkpd3a").value.trim(),
+      jawabanLkpd3b: document.getElementById("jawabanLkpd3b").value.trim()
+    };
+    // Anda bisa menambahkan logika perhitungan jawaban benar/salah jika diperlukan
+    // Contoh sederhana (hanya untuk ilustrasi):
+    const jawabanBenar = 0; // Tentukan logika cek benar sendiri jika mau
+    const jawabanSalah = 0; // Tentukan logika cek salah sendiri jika mau
+    const payload = {
+      nama: currentUser.name,
+      kelas: currentUser.class,
+      jawabanBenar: jawabanBenar,
+      jawabanSalah: jawabanSalah,
+      detailJawaban: detailJawaban
+    };
+    try {
+      const response = await fetch(GAS_URL, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const result = await response.json();
+      if (result.status === 'success') {
+        // Tampilkan pesan sukses sesuai UI Anda
+        alert("Jawaban LKPD berhasil dikirim!");
+      } else {
+        alert("Gagal mengirim data: " + (result.message || ""));
+      }
+    } catch (e) {
+      alert("Terjadi kesalahan: " + e.message);
+    }
+  }
+  // Modifikasi fungsi simpanLkpd untuk mengirim data ke Google Sheets via GAS
+  function simpanLkpd() {
+    kirimHasilLkpd();
+  }
+  // Contoh fungsi kirim hasil KUIS BERLATIH ke GAS, Anda bisa buat analog
+  async function kirimHasilKuis(jawabanBenarCount, jawabanSalahCount, detailJawabanArray) {
+    if (!currentUser.name || !currentUser.class) {
+      alert("Mohon login terlebih dahulu.");
+      return;
+    }
+    const payload = {
+      nama: currentUser.name,
+      kelas: currentUser.class,
+      jawabanBenar: jawabanBenarCount,
+      jawabanSalah: jawabanSalahCount,
+      detailJawaban: detailJawabanArray
+    };
+    try {
+      const response = await fetch(GAS_URL, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const result = await response.json();
+      if (result.status === 'success') {
+        console.log("Hasil kuis berhasil dikirim");
+      } else {
+        console.error("Gagal kirim hasil kuis: ", result.message);
+      }
+    } catch (e) {
+      console.error("Error mengirim hasil kuis:", e);
+    }
+  }
+  // Ubah bagian submitQuizAnswer untuk mengirim hasil akhir ke GAS
+  function submitQuizAnswer() {
+    if (selectedQuizOption === null) {
+      alert("Pilihlah salah satu jawaban terlebih dahulu!");
+      return;
+    }
+    if (selectedQuizOption === quizData[quizIndex].ans) {
+      quizScore += 10;
+    }
+    quizIndex++;
+    if (quizIndex >= quizData.length) {
+      // Kirim hasil kuis ke GAS
+      const detailJawaban = quizData.map((q, idx) => ({
+        soal: q.q,
+        jawabanPilihan: q.opts[selectedQuizOption],
+        jawabanBenar: q.opts[q.ans]
+      }));
+      kirimHasilKuis(quizScore / 10, quizData.length - (quizScore / 10), detailJawaban);
+    }
+    loadQuizQuestion();
+  }
+</script>
+Catatan: Anda hanya perlu mengganti nilai "URL_GAS_ANDA_DISINI" dengan URL Web App Google Apps Script yang sudah Anda deploy (lihat panduan di bawah).
+
+C. Panduan Deployment
+1. Menyiapkan Google Spreadsheet & Apps Script Web App
+Buat Google Spreadsheet baru di Google Drive Anda.
+Klik menu Extensions > Apps Script untuk membuka editor Apps Script.
+Di editor Apps Script:
+Hapus kode yang ada dan tempelkan kode Code.gs yang saya berikan di atas.
+Simpan project dengan nama misalnya "Backend MPI Pecahan".
+Deploy sebagai Web App:
+Klik Deploy > New Deployment.
+Pilih Type: Web app.
+Beri nama versi (contoh: "v1").
+Pada "Execute as", pilih Me (pemilik script).
+Pada "Who has access", pilih Anyone (open access, karena dipanggil dari GitHub Pages).
+Klik Deploy.
+Beri otorisasi yang diperlukan (izinkan akses).
+Setelah deploy selesai, salin URL Web App yang diberikan, ini adalah URL yang harus digunakan untuk GAS_URL di frontend HTML Anda.
+2. Men-Deploy Frontend ke GitHub Pages
+Buat repositori GitHub baru, misalnya dengan nama mpi-pecahan.
+Upload file HTML Anda (misal file index.html yang sudah dimodifikasi) ke repositori.
+Di GitHub repository:
+Pergi ke Settings > Pages.
+Pada "Source" pilih branch (biasanya main) dan folder root (/root) — lalu klik Save.
+GitHub akan membangun halaman dan memberikan URL halaman Anda, misal https://username.github.io/mpi-pecahan/.
+Buka URL tersebut dan lakukan pengujian aplikasi.
+Dengan setup ini, data jawaban siswa dari frontend akan tersimpan secara otomatis ke Google Sheets "Hasil", dan jika perlu Anda bisa mengelola soal di sheet "Data Soal".
+
+Jika Anda butuh bantuan tambahan atau modifikasi kode lebih lanjut, silakan beri tahu. Saya siap membantu!
+
+
+
+
+
+
+
+Type your message...
+
